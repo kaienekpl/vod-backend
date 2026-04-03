@@ -67,6 +67,45 @@ function normalizeThumbnailUrl(thumbnailUrl, width = 320, height = 180) {
     .replace("%{height}", String(height));
 }
 
+function normalizeBoxArtUrl(boxArtUrl, width = 188, height = 250) {
+  if (!boxArtUrl) return "";
+  return boxArtUrl
+    .replace("{width}", String(width))
+    .replace("{height}", String(height));
+}
+
+function deriveStoryboardUrl(thumbnailUrl, vodId) {
+  try {
+    if (!thumbnailUrl || !vodId) return "";
+    const m = thumbnailUrl.match(/^https:\/\/static-cdn\.jtvnw\.net\/cf_vods\/([^/]+)\/([^/]+)\/thumb\/thumb0-\d+x\d+\.jpg$/);
+    if (!m) return "";
+    const cloudfrontHostKey = m[1];
+    const vodPathKey = m[2];
+    return `https://${cloudfrontHostKey}.cloudfront.net/${vodPathKey}/storyboards/${vodId}-strip-0.jpg`;
+  } catch (_err) {
+    return "";
+  }
+}
+
+async function getGameData(token, gameId) {
+  if (!gameId) {
+    return {
+      game_id: "",
+      game_name: "",
+      box_art_url: ""
+    };
+  }
+
+  const games = await twitchGet("games", token, { id: gameId });
+  const game = games?.data?.[0];
+
+  return {
+    game_id: game?.id || gameId,
+    game_name: game?.name || "",
+    box_art_url: normalizeBoxArtUrl(game?.box_art_url || "", 188, 250)
+  };
+}
+
 async function getLatestVod() {
   assertEnv();
 
@@ -93,6 +132,11 @@ async function getLatestVod() {
     throw err;
   }
 
+  const gameData = await getGameData(token, vod.game_id);
+  const thumbnailSmall = normalizeThumbnailUrl(vod.thumbnail_url, 320, 180);
+  const thumbnailLarge = normalizeThumbnailUrl(vod.thumbnail_url, 640, 360);
+  const storyboardUrl = deriveStoryboardUrl(thumbnailSmall, vod.id);
+
   return {
     ok: true,
     broadcaster_login: TWITCH_LOGIN,
@@ -105,9 +149,12 @@ async function getLatestVod() {
     published_at: vod.published_at,
     duration: vod.duration,
     view_count: vod.view_count,
-    thumbnail_url: normalizeThumbnailUrl(vod.thumbnail_url, 320, 180),
-    thumbnail_url_large: normalizeThumbnailUrl(vod.thumbnail_url, 640, 360),
-    image_proxy_url: `/last-vod-image?size=large`,
+    thumbnail_url: thumbnailSmall,
+    thumbnail_url_large: thumbnailLarge,
+    storyboard_url: storyboardUrl,
+    game_id: gameData.game_id,
+    game_name: gameData.game_name,
+    box_art_url: gameData.box_art_url,
     language: vod.language || "",
     type: vod.type || "",
     fetched_at: new Date().toISOString()
@@ -118,7 +165,7 @@ app.get("/", (_req, res) => {
   res.json({
     ok: true,
     service: "vod-backend",
-    endpoints: ["/health", "/last-vod", "/last-vod-image?size=small|large"]
+    endpoints: ["/health", "/last-vod"]
   });
 });
 
@@ -134,32 +181,6 @@ app.get("/last-vod", async (_req, res) => {
   try {
     const data = await getLatestVod();
     res.json(data);
-  } catch (error) {
-    res.status(error.statusCode || 500).json({
-      ok: false,
-      error: error.message || "Unknown error"
-    });
-  }
-});
-
-app.get("/last-vod-image", async (req, res) => {
-  try {
-    const size = String(req.query.size || "large").toLowerCase();
-    const data = await getLatestVod();
-    const imageUrl = size === "small" ? data.thumbnail_url : data.thumbnail_url_large;
-
-    const upstream = await fetch(imageUrl);
-    if (!upstream.ok) {
-      const text = await upstream.text();
-      throw new Error("Thumbnail fetch error: " + text);
-    }
-
-    const contentType = upstream.headers.get("content-type") || "image/jpeg";
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.send(buffer);
   } catch (error) {
     res.status(error.statusCode || 500).json({
       ok: false,
