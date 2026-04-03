@@ -67,43 +67,24 @@ function normalizeThumbnailUrl(thumbnailUrl, width = 320, height = 180) {
     .replace("%{height}", String(height));
 }
 
-function normalizeBoxArtUrl(boxArtUrl, width = 188, height = 250) {
-  if (!boxArtUrl) return "";
-  return boxArtUrl
-    .replace("{width}", String(width))
-    .replace("{height}", String(height));
-}
-
 function deriveStoryboardUrl(thumbnailUrl, vodId) {
   try {
     if (!thumbnailUrl || !vodId) return "";
-    const m = thumbnailUrl.match(/^https:\/\/static-cdn\.jtvnw\.net\/cf_vods\/([^/]+)\/([^/]+)\/thumb\/thumb0-\d+x\d+\.jpg$/);
-    if (!m) return "";
-    const cloudfrontHostKey = m[1];
-    const vodPathKey = m[2];
+
+    const normalized = thumbnailUrl.replace("https://static-cdn.jtvnw.net/cf_vods/", "");
+    const parts = normalized.split("/").filter(Boolean);
+
+    if (parts.length < 3) return "";
+
+    const cloudfrontHostKey = parts[0];
+    const vodPathKey = parts[1];
+
+    if (!cloudfrontHostKey || !vodPathKey) return "";
+
     return `https://${cloudfrontHostKey}.cloudfront.net/${vodPathKey}/storyboards/${vodId}-strip-0.jpg`;
   } catch (_err) {
     return "";
   }
-}
-
-async function getGameData(token, gameId) {
-  if (!gameId) {
-    return {
-      game_id: "",
-      game_name: "",
-      box_art_url: ""
-    };
-  }
-
-  const games = await twitchGet("games", token, { id: gameId });
-  const game = games?.data?.[0];
-
-  return {
-    game_id: game?.id || gameId,
-    game_name: game?.name || "",
-    box_art_url: normalizeBoxArtUrl(game?.box_art_url || "", 188, 250)
-  };
 }
 
 async function getLatestVod() {
@@ -132,7 +113,6 @@ async function getLatestVod() {
     throw err;
   }
 
-  const gameData = await getGameData(token, vod.game_id);
   const thumbnailSmall = normalizeThumbnailUrl(vod.thumbnail_url, 320, 180);
   const thumbnailLarge = normalizeThumbnailUrl(vod.thumbnail_url, 640, 360);
   const storyboardUrl = deriveStoryboardUrl(thumbnailSmall, vod.id);
@@ -152,9 +132,9 @@ async function getLatestVod() {
     thumbnail_url: thumbnailSmall,
     thumbnail_url_large: thumbnailLarge,
     storyboard_url: storyboardUrl,
-    game_id: gameData.game_id,
-    game_name: gameData.game_name,
-    box_art_url: gameData.box_art_url,
+    game_id: "",
+    game_name: "",
+    box_art_url: "",
     language: vod.language || "",
     type: vod.type || "",
     fetched_at: new Date().toISOString()
